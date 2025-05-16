@@ -1,48 +1,66 @@
 import streamlit as st
-from auth import auth_page, is_authenticated
-from notifications import init_notifications
+from auth import init_auth, store_user_session
+from notifications import add_notification
+from streamlit_cookies_manager import EncryptedCookieManager
+import re
 
-# Set page config
-st.set_page_config(
-    page_title="Login - SQL Tool",
-    page_icon="🔑",
-    layout="wide"
-)
+def login_page():
+    st.title("🔐 Login to QueryVista")
 
-# Initialize notifications
-init_notifications()
+    # Cookie setup
+    cookie_password = st.secrets["cookies"]["pwd"]
+    cookies = EncryptedCookieManager(prefix="queryvista/", password=cookie_password)
+    if not cookies.ready():
+        st.stop()
 
-# Main content
-def main():
-    if is_authenticated():
-        st.success("You're already logged in!")
-        
-        # Provide option to go to home page
-        if st.button("Go to Home Page", use_container_width=True):
-            st.switch_page("app.py")
-        
-        # Provide option to go to file manager
-        if st.button("Go to File Manager", use_container_width=True):
-            st.switch_page("pages/04_File_Manager.py")
-    else:
-        # Center the login form
-        col1, col2, col3 = st.columns([1, 2, 1])
-        
-        with col2:
-            st.title("Login / Create Account")
-            st.markdown("""
-            ### Welcome to QueryVista
-            
-            Access all features by signing in to your account or creating a new one.
-            """)
-            
-            # Show the login/signup form
-            auth_page()
-            
-            # Add a button to go back to home
-            st.markdown("---")
-            if st.button("Back to Home", use_container_width=True):
-                st.switch_page("app.py")
+    email = st.text_input("📧 Email")
+    password = st.text_input("🔒 Password", type="password")
 
-if __name__ == "__main__":
-    main()
+    if st.button("Login"):
+        if not email or not password:
+            st.error("❌ Please enter both email and password.")
+            return
+
+        try:
+            supabase = init_auth()
+            response = supabase.auth.sign_in_with_password({
+                "email": email,
+                "password": password
+            })
+
+            if response.user:
+                st.session_state.authenticated = True
+                st.session_state.user_id = response.user.id
+                st.session_state.user_email = response.user.email
+
+                if response.session:
+                    st.session_state.access_token = response.session.access_token
+                    st.session_state.refresh_token = response.session.refresh_token
+                    cookies["access_token"] = response.session.access_token
+                    cookies["refresh_token"] = response.session.refresh_token
+                    cookies.save()
+
+                store_user_session(
+                    st.session_state.user_id,
+                    st.session_state.user_email,
+                    st.session_state.access_token,
+                    st.session_state.refresh_token
+                )
+
+                add_notification("✅ Login Successful", f"Welcome back, {email}!")
+                st.rerun()
+
+            else:
+                st.error("❌ Login failed. Please check your credentials.")
+
+        except Exception as e:
+            if "Invalid login credentials" in str(e):
+                st.error("❌ Invalid email or password.")
+            else:
+                st.error(f"⚠️ Login failed: {str(e)}")
+
+    st.write("---")
+    st.caption("Don't have an account?")
+    if st.button("Create an Account"):
+        st.session_state.auth_mode = "signup"
+        st.rerun()
