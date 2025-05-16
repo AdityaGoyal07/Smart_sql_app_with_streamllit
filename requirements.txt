@@ -114,7 +114,7 @@ realtime==2.4.3
 referencing==0.36.2
 requests==2.32.3
 requests-oauthlib==2.0.0
-requests-toolbelt==0.7.0
+requests-toolbelt>=0.7.1
 rpds-py==0.24.0
 rsa==4.9.1
 six==1.17.0
