@@ -26,8 +26,8 @@ st.markdown(
     <style>
     .logo-container {{
         position: absolute;
-        top: 25px;
-        right: 25px;
+        top: 1opx;
+        right: 10px;
         z-index: 9999;
     }}
     .logo-container img {{
