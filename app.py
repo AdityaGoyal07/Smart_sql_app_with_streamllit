@@ -19,8 +19,8 @@ def get_base64_image(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
-logo_base64 = get_base64_image("D:/SQL_FINAL/static/generated-icon.png")  # Replace with your actual logo path
-#gif_base64 = get_base64_image("D:/SQL_FINAL/static/a9176696b8740c402d84b55374ea0107_w200.gif")
+logo_base64 = get_base64_image("static/generated-icon.png")  # Replace with your actual logo path
+#gif_base64 = get_base64_image("static/a9176696b8740c402d84b55374ea0107_w200.gif")
 st.markdown(
     f"""
     <style>
@@ -117,21 +117,21 @@ def main_page():
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.image("D:/SQL_FINAL/static/1_rjZRlTUuIVpYMiExc5_KJg.gif")
+        st.image("static/1_rjZRlTUuIVpYMiExc5_KJg.gif")
         st.markdown("### Query Builder")
         st.write("Build SQL queries visually without writing code. Select tables, columns, and conditions through an intuitive interface.")
         if st.button("Go to Query Builder", key="go_qb", use_container_width=True):
             st.switch_page("pages/01_Query_Builder.py")
 
     with col2:
-        st.image("D:/SQL_FINAL/static/MicrosoftSQL_ArticleCoverImage_1920x600px.gif")
+        st.image("static/MicrosoftSQL_ArticleCoverImage_1920x600px.gif")
         st.markdown("### Custom Query")
         st.write("Write and execute your own SQL queries directly. Ideal for experienced users who need precise control over their database operations.")
         if st.button("Go to Custom Query", key="go_cq", use_container_width=True):
             st.switch_page("pages/02_Custom_Query.py")
 
     with col3:
-        st.image("D:/SQL_FINAL/static/1675537898711.gif",)
+        st.image("static/1675537898711.gif",)
         st.markdown("### AI Query Assistant")
         st.write("Convert natural language to SQL. Just describe what you want in plain English, and let AI generate the SQL query for you.")
         if st.button("Go to AI Query", key="go_ai", use_container_width=True):
