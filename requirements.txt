@@ -96,7 +96,7 @@ pyarrow==20.0.0
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pycparser==2.22
-pycryptodome==3.4.3
+pycryptodome>=3.6.4
 pydantic==2.11.4
 pydantic_core==2.33.2
 pydeck==0.9.1
