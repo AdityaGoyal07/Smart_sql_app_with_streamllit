@@ -7,18 +7,15 @@ from sql_utils import sanitize_identifier, load_file_as_table
 from history import add_to_history
 from notifications import add_notification
 
-DISPLAY_TO_INTERNAL = {
-    "From PC": "pc",
-    "Google Drive": "google_drive",
-    "Scheduled Uploads": "scheduled",
-}
 
 def render_query_builder_ui(user_id: str, bucket: str = "pc"):
+    st.info(f"Current source: `{bucket}`")
+
     supabase = init_supabase_storage()
     files = list_files(supabase=supabase, upload_type=bucket)
 
     if not files:
-        st.warning("No files found.")
+        st.warning("No files found for selected source.")
         return
 
     selected_files = st.multiselect("Select files to build query from", [f['file_name'] for f in files])
@@ -26,10 +23,11 @@ def render_query_builder_ui(user_id: str, bucket: str = "pc"):
         st.info("Please select at least one file.")
         return
 
-    # Load files as DuckDB tables
     con = duckdb.connect()
     table_dataframes = {}
     columns_dict = {}
+
+    st.subheader("Loaded Table Schema")
 
     for fname in selected_files:
         file_obj = next((f for f in files if f['file_name'] == fname), None)
@@ -42,22 +40,71 @@ def render_query_builder_ui(user_id: str, bucket: str = "pc"):
                 con.register(table_name, df)
                 table_dataframes[table_name] = df
                 columns_dict[table_name] = df.columns.tolist()
-                st.caption(f"Loaded `{fname}` as table `{table_name}`")
+
+                with st.expander(f"📄 `{table_name}` Schema"):
+                    st.write(df.head(5))
 
     selected_tables = list(table_dataframes.keys())
     if not selected_tables:
         st.error("No tables could be loaded.")
         return
 
-    # Column selection
-    st.subheader("Select Columns to Display")
-    all_columns = []
-    for t in selected_tables:
-        all_columns.extend([f"{t}.{col}" for col in columns_dict[t]])
+    st.subheader("Select Columns")
+    all_columns = list({col for cols in columns_dict.values() for col in cols})
+    selected_columns = st.multiselect("Columns to display", all_columns, default=all_columns[:5])
 
-    selected_columns = st.multiselect("Select columns", all_columns, default=all_columns[:10])
+    # --- Aggregate functions section with toggle and dynamic add/remove ---
+    st.subheader("Apply Aggregate Functions (optional)")
 
-    # Join logic
+    if st.checkbox("Apply Aggregate Functions"):
+        if "agg_conditions" not in st.session_state:
+            st.session_state.agg_conditions = []  # list of dicts {column, function}
+
+        def add_agg_condition():
+            st.session_state.agg_conditions.append({"column": None, "function": None})
+
+        if st.button("➕ Add Aggregate Function"):
+            add_agg_condition()
+
+        aggregate_functions = ["COUNT", "SUM", "AVG", "MIN", "MAX"]
+
+        remove_idx = None
+        for i, agg_cond in enumerate(st.session_state.agg_conditions):
+            cols = st.columns([3, 3, 1])
+            with cols[0]:
+                col_selected = st.selectbox(
+                    f"Select column #{i + 1}",
+                    selected_columns,
+                    index=selected_columns.index(agg_cond["column"]) if agg_cond["column"] in selected_columns else 0,
+                    key=f"agg_col_{i}",
+                )
+            with cols[1]:
+                func_selected = st.selectbox(
+                    f"Function #{i + 1}",
+                    aggregate_functions,
+                    index=aggregate_functions.index(agg_cond["function"]) if agg_cond["function"] in aggregate_functions else 0,
+                    key=f"agg_func_{i}",
+                )
+            with cols[2]:
+                if st.button("Remove", key=f"rm_agg_{i}"):
+                    remove_idx = i
+
+            st.session_state.agg_conditions[i]["column"] = col_selected
+            st.session_state.agg_conditions[i]["function"] = func_selected
+
+        if remove_idx is not None:
+            st.session_state.agg_conditions.pop(remove_idx)
+            st.rerun()
+    else:
+        st.session_state.agg_conditions = []
+
+    # Build aggregate_selection dict from session state
+    aggregate_selection = {}
+    for agg_cond in st.session_state.get("agg_conditions", []):
+        if agg_cond["column"] and agg_cond["function"]:
+            aggregate_selection[agg_cond["column"]] = agg_cond["function"]
+
+    # --- Joins ---
     join_ops = ["INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "CROSS JOIN"]
     if "join_conditions" not in st.session_state:
         st.session_state.join_conditions = []
@@ -69,23 +116,27 @@ def render_query_builder_ui(user_id: str, bucket: str = "pc"):
             t2 = selected_tables[i + 1]
             st.markdown(f"**Join `{t1}` ↔ `{t2}`**")
 
-            join_col1 = st.selectbox(f"Join column from `{t1}`", columns_dict[t1], key=f"jc1_{i}")
-            join_col2 = st.selectbox(f"Join column from `{t2}`", columns_dict[t2], key=f"jc2_{i}")
+            common_cols = list(set(columns_dict[t1]) & set(columns_dict[t2]))
+            if not common_cols:
+                st.warning(f"No common columns between `{t1}` and `{t2}`")
+                continue
+
+            join_col = st.selectbox("Join on column", common_cols, key=f"jc_{i}")
             join_op = st.selectbox("Join type", join_ops, key=f"joinop_{i}")
 
             if len(st.session_state.join_conditions) <= i:
                 st.session_state.join_conditions.append({})
+
             st.session_state.join_conditions[i] = {
                 "left_table": t1,
                 "right_table": t2,
-                "left_col": join_col1,
-                "right_col": join_col2,
-                "operator": join_op
+                "col": join_col,
+                "operator": join_op,
             }
     else:
         st.session_state.join_conditions = []
 
-    # WHERE Conditions
+    # --- WHERE conditions ---
     st.subheader("WHERE Conditions")
     if "conditions" not in st.session_state:
         st.session_state.conditions = []
@@ -103,80 +154,92 @@ def render_query_builder_ui(user_id: str, bucket: str = "pc"):
                 st.session_state.conditions.pop(i)
                 st.rerun()
 
-    with st.expander("Add Condition"):
+    with st.expander("➕ Add Condition"):
         cond_col = st.selectbox("Column", all_columns, key="cond_col")
-        cond_op = st.selectbox("Operator", ["=", "!=", ">", "<", ">=", "<=", "LIKE", "IN", "IS NULL", "IS NOT NULL"])
+        cond_op = st.selectbox(
+            "Operator",
+            ["=", "!=", ">", "<", ">=", "<=", "LIKE", "IN", "IS NULL", "IS NOT NULL"],
+        )
         cond_val = "" if cond_op in ["IS NULL", "IS NOT NULL"] else st.text_input("Value", key="cond_val")
 
         if st.button("Add Condition"):
             if cond_op not in ["IS NULL", "IS NOT NULL"] and not cond_val:
                 st.warning("Enter value for the condition.")
             else:
-                st.session_state.conditions.append({
-                    "column": cond_col,
-                    "operator": cond_op,
-                    "value": cond_val
-                })
+                st.session_state.conditions.append(
+                    {"column": cond_col, "operator": cond_op, "value": cond_val}
+                )
                 st.rerun()
 
-    # Order & Limit
+    # --- ORDER & LIMIT ---
     st.subheader("Order & Limit")
     order_col = st.selectbox("Order by", ["None"] + all_columns)
     order_dir = st.selectbox("Order Direction", ["ASC", "DESC"])
     limit = st.number_input("Limit", min_value=1, value=100)
 
-    # Generate SQL
-    st.subheader("Generated SQL")
+    # --- SQL Query Generation ---
+    base_table = sanitize_identifier(selected_tables[0])
 
-    try:
-        sanitized_tables = [sanitize_identifier(t) for t in selected_tables]
-    except Exception as e:
-        st.error(f"Invalid table name: {e}")
-        return
+    select_parts = []
+    group_by_cols = []
 
-    query = f"SELECT {', '.join(selected_columns) if selected_columns else '*'} FROM {sanitized_tables[0]}"
+    # If aggregates chosen, show those aggregates for those columns
+    # Columns without aggregate function will be grouped by
+    if aggregate_selection:
+        for col in selected_columns:
+            col_id = sanitize_identifier(col)
+            if col in aggregate_selection:
+                func = aggregate_selection[col]
+                select_parts.append(f"{func}({col_id}) AS {func.lower()}_{col_id}")
+            else:
+                # Non-aggregated columns must appear in GROUP BY
+                select_parts.append(col_id)
+                group_by_cols.append(col_id)
+    else:
+        # No aggregates, select all chosen columns as-is
+        select_parts = [sanitize_identifier(col) for col in selected_columns]
+
+    query = f"SELECT {', '.join(select_parts) if select_parts else '*'} FROM {base_table}"
 
     for jc in st.session_state.join_conditions:
         lt = sanitize_identifier(jc["left_table"])
         rt = sanitize_identifier(jc["right_table"])
-        lc = sanitize_identifier(jc["left_col"])
-        rc = sanitize_identifier(jc["right_col"])
+        col = sanitize_identifier(jc["col"])
         op = jc["operator"]
-        query += f" {op} {rt} ON {lt}.{lc} = {rt}.{rc}"
+        query += f" {op} {rt} ON {lt}.{col} = {rt}.{col}"
 
     if st.session_state.conditions:
         where_clauses = []
         for cond in st.session_state.conditions:
-            col = cond["column"]
+            col = sanitize_identifier(cond["column"])
             op = cond["operator"]
             val = cond["value"]
 
-            t, c = col.split(".")
-            t = sanitize_identifier(t)
-            c = sanitize_identifier(c)
-
             if op in ["IS NULL", "IS NOT NULL"]:
-                where_clauses.append(f"{t}.{c} {op}")
+                where_clauses.append(f"{col} {op}")
             elif op == "IN":
                 values = ", ".join([f"'{v.strip()}'" for v in val.split(",")])
-                where_clauses.append(f"{t}.{c} IN ({values})")
+                where_clauses.append(f"{col} IN ({values})")
             elif op == "LIKE":
-                where_clauses.append(f"{t}.{c} LIKE '%{val}%'")
+                where_clauses.append(f"{col} LIKE '%{val}%'")
             else:
                 try:
                     float(val)
-                    where_clauses.append(f"{t}.{c} {op} {val}")
+                    where_clauses.append(f"{col} {op} {val}")
                 except:
-                    where_clauses.append(f"{t}.{c} {op} '{val}'")
+                    where_clauses.append(f"{col} {op} '{val}'")
 
         query += " WHERE " + " AND ".join(where_clauses)
 
+    if group_by_cols:
+        query += " GROUP BY " + ", ".join(group_by_cols)
+
     if order_col != "None":
-        t, c = order_col.split(".")
-        query += f" ORDER BY {sanitize_identifier(t)}.{sanitize_identifier(c)} {order_dir}"
+        query += f" ORDER BY {sanitize_identifier(order_col)} {order_dir}"
 
     query += f" LIMIT {limit}"
 
+    st.subheader("Generated SQL")
     st.code(query, language="sql")
 
     if st.button("Run Query"):
