@@ -103,9 +103,10 @@ def render_ai_query_ui():
                     {"name": sanitize_column_name(col), "type": str(df[col].dtype)}
                     for col in df.columns
                 ]
-                st.caption(f"Loaded `{file_obj['file_name']}` as **{table_name}**")
-                st.dataframe(df.head())
 
+                with st.expander(f"📄 {file_obj['file_name']} → **{table_name}**", expanded=False):
+                    st.markdown(f"**Columns**: {', '.join(df.columns)}")
+                    st.dataframe(df.head())
 
     if not table_dataframes:
         st.error("Failed to load any selected files.")
