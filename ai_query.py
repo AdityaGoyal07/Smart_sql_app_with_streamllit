@@ -142,7 +142,15 @@ def render_ai_query_ui():
 
     if "generated_sql" in st.session_state:
         st.subheader("4️⃣ Generated SQL")
-        edited_sql = st.text_area("Review or Edit SQL", value=st.session_state.generated_sql, height=150)
+        # Read-only display with full height auto-adjust
+        st.code(st.session_state.generated_sql, language="sql")
+        
+        # Optional editable version (expanded to fit text)
+        edited_sql = st.text_area(
+            "Edit SQL (optional)", 
+            value=st.session_state.generated_sql, 
+            height=min(600, int(len(st.session_state.generated_sql.splitlines()) * 24 + 40))
+        )
 
         col1, col2 = st.columns(2)
         with col1:
